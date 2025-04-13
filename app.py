@@ -2,17 +2,25 @@ import streamlit as st
 import pandas as pd
 import time
 import os
+import json
 from datetime import datetime, timedelta
 import plotly.express as px
 
 st.set_page_config(page_title="Gestor de Enfoque y Pausa", layout="centered")
 st.title("Gestor de Enfoque y Pausa Activa")
 
-archivo_registro = "registro_enfoque.csv"
+archivo_csv = "registro_enfoque.csv"
+archivo_json = "registro_enfoque.json"
 
-if not os.path.exists(archivo_registro):
-    df_init = pd.DataFrame(columns=["Actividad", "Inicio", "Fin", "Duración", "Estado"])
-    df_init.to_csv(archivo_registro, index=False)
+# Cargar historial si existen
+if os.path.exists(archivo_csv):
+    df_hist = pd.read_csv(archivo_csv)
+else:
+    df_hist = pd.DataFrame(columns=["Actividad", "Inicio", "Fin", "Duración", "Estado"])
+    df_hist.to_csv(archivo_csv, index=False)
+
+# Guardar también en JSON
+df_hist.to_json(archivo_json, orient="records", indent=4)
 
 tab1, tab2 = st.tabs(["Enfoque / Pausa", "Historial y Progreso"])
 
@@ -37,13 +45,16 @@ with tab1:
         st.success("¡Tiempo de enfoque finalizado!")
 
         duracion = str(fin - inicio).split(".")[0]
-        pd.DataFrame([{
+        nueva_fila = {
             "Actividad": actividad,
             "Inicio": inicio.strftime("%Y-%m-%d %H:%M:%S"),
             "Fin": fin.strftime("%Y-%m-%d %H:%M:%S"),
             "Duración": duracion,
             "Estado": "Enfoque"
-        }]).to_csv(archivo_registro, mode='a', header=False, index=False)
+        }
+        df_hist = pd.concat([df_hist, pd.DataFrame([nueva_fila])], ignore_index=True)
+        df_hist.to_csv(archivo_csv, index=False)
+        df_hist.to_json(archivo_json, orient="records", indent=4)
 
         if st.checkbox("¿Tomar pausa activa ahora?"):
             tiempo_total_pausa = tiempo_pausa * factor
@@ -56,32 +67,34 @@ with tab1:
             st.success("¡Fin de la pausa activa!")
 
             duracion_pausa = str(fin_pausa - inicio_pausa).split(".")[0]
-            pd.DataFrame([{
+            pausa_fila = {
                 "Actividad": actividad,
                 "Inicio": inicio_pausa.strftime("%Y-%m-%d %H:%M:%S"),
                 "Fin": fin_pausa.strftime("%Y-%m-%d %H:%M:%S"),
                 "Duración": duracion_pausa,
                 "Estado": "Pausa Activa"
-            }]).to_csv(archivo_registro, mode='a', header=False, index=False)
+            }
+            df_hist = pd.concat([df_hist, pd.DataFrame([pausa_fila])], ignore_index=True)
+            df_hist.to_csv(archivo_csv, index=False)
+            df_hist.to_json(archivo_json, orient="records", indent=4)
 
         st.balloons()
 
 with tab2:
     st.subheader("Historial de sesiones")
 
-    if os.path.exists(archivo_registro):
-        df = pd.read_csv(archivo_registro)
-        df["Inicio"] = pd.to_datetime(df["Inicio"])
-        df["Fecha"] = df["Inicio"].dt.date
+    if not df_hist.empty:
+        df_hist["Inicio"] = pd.to_datetime(df_hist["Inicio"])
+        df_hist["Fecha"] = df_hist["Inicio"].dt.date
 
-        actividad_filtrada = st.selectbox("Filtrar por actividad (opcional)", ["Todas"] + sorted(df["Actividad"].dropna().unique().tolist()))
+        actividad_filtrada = st.selectbox("Filtrar por actividad (opcional)", ["Todas"] + sorted(df_hist["Actividad"].dropna().unique().tolist()))
         if actividad_filtrada != "Todas":
-            df = df[df["Actividad"] == actividad_filtrada]
+            df_hist = df_hist[df_hist["Actividad"] == actividad_filtrada]
 
-        st.dataframe(df)
-        st.download_button("Descargar CSV", df.to_csv(index=False), file_name="registro_enfoque.csv")
+        st.dataframe(df_hist)
+        st.download_button("Descargar CSV", df_hist.to_csv(index=False), file_name="registro_enfoque.csv")
 
-        df_enfoque = df[df["Estado"] == "Enfoque"]
+        df_enfoque = df_hist[df_hist["Estado"] == "Enfoque"]
         fechas_con_actividad = sorted(df_enfoque["Fecha"].unique(), reverse=True)
 
         # Calcular racha
