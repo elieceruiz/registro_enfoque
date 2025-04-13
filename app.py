@@ -2,20 +2,19 @@ import streamlit as st
 import pandas as pd
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import plotly.express as px
 
-st.set_page_config(page_title="Gestor de Enfoque", layout="centered")
+st.set_page_config(page_title="Gestor de Enfoque y Pausa", layout="centered")
 st.title("Gestor de Enfoque y Pausa Activa")
 
 archivo_registro = "registro_enfoque.csv"
 
-# Inicializar archivo CSV si no existe
 if not os.path.exists(archivo_registro):
     df_init = pd.DataFrame(columns=["Actividad", "Inicio", "Fin", "Duración", "Estado"])
     df_init.to_csv(archivo_registro, index=False)
 
-# Pestañas de navegación
-tab1, tab2 = st.tabs(["Enfoque / Pausa", "Historial"])
+tab1, tab2 = st.tabs(["Enfoque / Pausa", "Historial y Progreso"])
 
 with tab1:
     unidad = st.radio("¿Trabajar en minutos o segundos?", ["minutos", "segundos"])
@@ -27,54 +26,80 @@ with tab1:
 
     if st.button("Iniciar sesión de enfoque"):
         tiempo_total = tiempo_enfoque * factor
-        barra = st.progress(0, text="Enfoque en curso...")
-
+        barra = st.progress(0)
         inicio = datetime.now()
+
         st.success(f"¡Empieza a enfocarte en '{actividad}'!")
         for i in range(tiempo_total):
             time.sleep(1)
-            barra.progress((i + 1) / tiempo_total, text=f"Enfoque: {i + 1}/{tiempo_total} segundos")
+            barra.progress((i + 1) / tiempo_total)
         fin = datetime.now()
         st.success("¡Tiempo de enfoque finalizado!")
 
         duracion = str(fin - inicio).split(".")[0]
-        nueva_fila = pd.DataFrame([{
+        pd.DataFrame([{
             "Actividad": actividad,
             "Inicio": inicio.strftime("%Y-%m-%d %H:%M:%S"),
             "Fin": fin.strftime("%Y-%m-%d %H:%M:%S"),
             "Duración": duracion,
             "Estado": "Enfoque"
-        }])
-        nueva_fila.to_csv(archivo_registro, mode='a', header=False, index=False)
+        }]).to_csv(archivo_registro, mode='a', header=False, index=False)
 
         if st.checkbox("¿Tomar pausa activa ahora?"):
             tiempo_total_pausa = tiempo_pausa * factor
-            barra_pausa = st.progress(0, text="Pausa activa en curso...")
-
+            barra_pausa = st.progress(0)
             inicio_pausa = datetime.now()
             for i in range(tiempo_total_pausa):
                 time.sleep(1)
-                barra_pausa.progress((i + 1) / tiempo_total_pausa, text=f"Pausa: {i + 1}/{tiempo_total_pausa} segundos")
+                barra_pausa.progress((i + 1) / tiempo_total_pausa)
             fin_pausa = datetime.now()
             st.success("¡Fin de la pausa activa!")
 
             duracion_pausa = str(fin_pausa - inicio_pausa).split(".")[0]
-            nueva_pausa = pd.DataFrame([{
+            pd.DataFrame([{
                 "Actividad": actividad,
                 "Inicio": inicio_pausa.strftime("%Y-%m-%d %H:%M:%S"),
                 "Fin": fin_pausa.strftime("%Y-%m-%d %H:%M:%S"),
                 "Duración": duracion_pausa,
                 "Estado": "Pausa Activa"
-            }])
-            nueva_pausa.to_csv(archivo_registro, mode='a', header=False, index=False)
+            }]).to_csv(archivo_registro, mode='a', header=False, index=False)
 
         st.balloons()
 
 with tab2:
     st.subheader("Historial de sesiones")
+
     if os.path.exists(archivo_registro):
         df = pd.read_csv(archivo_registro)
+        df["Inicio"] = pd.to_datetime(df["Inicio"])
+        df["Fecha"] = df["Inicio"].dt.date
+
+        actividad_filtrada = st.selectbox("Filtrar por actividad (opcional)", ["Todas"] + sorted(df["Actividad"].dropna().unique().tolist()))
+        if actividad_filtrada != "Todas":
+            df = df[df["Actividad"] == actividad_filtrada]
+
         st.dataframe(df)
         st.download_button("Descargar CSV", df.to_csv(index=False), file_name="registro_enfoque.csv")
+
+        df_enfoque = df[df["Estado"] == "Enfoque"]
+        fechas_con_actividad = sorted(df_enfoque["Fecha"].unique(), reverse=True)
+
+        # Calcular racha
+        racha = 0
+        hoy = datetime.today().date()
+        for i, fecha in enumerate(fechas_con_actividad):
+            if fecha == hoy - timedelta(days=i):
+                racha += 1
+            else:
+                break
+        st.info(f"Racha actual: {racha} día(s) consecutivo(s) con sesiones de enfoque.")
+
+        # Gráfica
+        df_enfoque["Duración (min)"] = pd.to_timedelta(df_enfoque["Duración"]).dt.total_seconds() / 60
+        resumen = df_enfoque.groupby("Fecha")["Duración (min)"].sum().reset_index()
+
+        st.subheader("Progreso diario (minutos de enfoque)")
+        fig = px.bar(resumen, x="Fecha", y="Duración (min)", title="Tiempo de enfoque por día", labels={"Duración (min)": "Minutos"})
+        st.plotly_chart(fig)
     else:
         st.info("Aún no hay sesiones registradas.")
